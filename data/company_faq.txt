@@ -1,0 +1,11 @@
+NovaTech is an AI software company founded in 2022.
+
+NovaTech is headquartered in Cairo, Egypt.
+
+The company offers remote work on Mondays and Wednesdays.
+
+The Engineering team primarily uses Python and FastAPI.
+
+Every employee receives an annual learning budget of $1,200.
+
+Employees receive 21 days of annual paid leave.
