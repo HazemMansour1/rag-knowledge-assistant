@@ -1,0 +1,9 @@
+document_id,title,source,status,file_size_mb
+1,LLM Basics,Notion,ready,4.2
+2,RAG Intro,Google Drive,ready,3.5
+3,Agent Tutorial,Notion,pending,0.0
+4,Embedding Notes,Google Drive,ready,6.0
+5,RAG Intro,Google Drive,ready,3.5
+6,Vector Search,Unknown,ready,2.8
+7,Evaluation Guide,Notion,pending,7.1
+8,Data Pipelines,Google Drive,ready,0.0
