@@ -1,4 +1,9 @@
 from pathlib import Path
+import numpy as np
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import json
 
 document = Path("data/company_faq.txt").read_text(
     encoding="utf-8"
@@ -10,20 +15,57 @@ chunks = [chunk.strip()
           if chunk.strip()]
 
 
+# Create metadata for every document chunk
+metadata = [
+    {
+        "source": "company_faq.txt",
+        "chunk_id": i + 1
+    }
+    for i in range(len(chunks))
+]
+
+
 
 from sentence_transformers import SentenceTransformer
 # Load the embedding model
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
-# Convert all chunks into vectors
-embeddings = model.encode(chunks)
+cache_dir = Path("cache")
+cache_dir.mkdir(exist_ok=True)
+
+embeddings_path = cache_dir / "embeddings.npy"
+chunks_path = cache_dir / "chunks.json"
+
+# Check if our saved files exist
+if embeddings_path.exists() and chunks_path.exists():
+
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        cached_chunks = json.load(f)
+
+    if cached_chunks == chunks:
+        embeddings = np.load(embeddings_path)
+        print("Loaded cached embeddings!")
+
+    else:
+        embeddings = model.encode(chunks)
+        np.save(embeddings_path, embeddings)
+
+        with open(chunks_path, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
+
+        print("Documents changed. Cache updated!")
+
+else:
+    embeddings = model.encode(chunks)
+    np.save(embeddings_path, embeddings)
+
+    with open(chunks_path, "w", encoding="utf-8") as f:
+        json.dump(chunks, f, ensure_ascii=False, indent=2)
+
+    print("Created embeddings cache!")
 
 
-
-
-import numpy as np
-
-def retrieve(query, top_k=2):
+def retrieve(query, top_k=2,threshold = 0.35):
 
     # Convert the user's question into an embedding
     query_embedding = model.encode(query)
@@ -42,17 +84,32 @@ def retrieve(query, top_k=2):
 
     # Return the matching chunks and scores
     results = [
-        (chunks[i], float(similarities[i]))
+        (chunks[i], float(similarities[i]), metadata[i])
         for i in top_indices
+        if similarities[i] >= threshold
     ]
+
 
     return results
 
+# def inspect_retrieval(questions):
 
+#     for question in questions:
+#         results = retrieve(question, top_k=2, threshold=0.35)
 
-import os
-from dotenv import load_dotenv
-from openai import OpenAI
+#         print(f"\nQuestion: {question}")
+
+#         if not results:
+#             print("No relevant documents retrieved.")
+#             continue
+
+#         for chunk, score, meta in results:
+#             print(
+#                 f"Chunk {meta['chunk_id']} | "
+#                 f"Similarity: {score:.3f}"
+#             )
+#             print(f"Text: {chunk[:100]}...")
+
 
 load_dotenv()
 
@@ -69,15 +126,19 @@ client = OpenAI(
 
 def generate_answer(question):
 
-    # Step 1: Retrieve relevant chunks
+   
+    # Step 1: Retrieve relevant chunks once
     results = retrieve(question, top_k=2)
+    if not results:
+        return "I don't know based on the provided documents.", []
 
-    # Step 2: Combine retrieved chunks into context
+    # Step 2: Build context with source identifiers
     context = "\n\n".join(
-        chunk for chunk, score in results
+        f"[Source {i+1}] {chunk}"
+        for i, (chunk, score, meta) in enumerate(results)
     )
 
-    # Step 3: Send context and question to the LLM
+    # Step 3: Generate answer
     response = client.chat.completions.create(
         model="openrouter/free",
         messages=[
@@ -88,7 +149,9 @@ def generate_answer(question):
                     "Answer questions using ONLY the provided context. "
                     "If the context does not contain the answer, "
                     "say 'I don't know based on the provided documents'. "
-                    "Do not invent information."
+                    "Do not invent information. "
+                    "Cite supporting context using [Source 1], "
+                    "[Source 2], etc."
                 )
             },
             {
@@ -102,14 +165,11 @@ def generate_answer(question):
         temperature=0
     )
 
-    return response.choices[0].message.content
+    answer = response.choices[0].message.content
 
+    # Return both the answer and the sources
+    return answer, results
 
-question = "How many vacation days do employees get?"
-
-answer = generate_answer(question)
-
-print("\nRAG Answer:", answer)
 
 
 
@@ -126,10 +186,15 @@ if __name__ == "__main__":
         if not question:
             continue
 
-        answer = generate_answer(question)
+        answer, sources = generate_answer(question)
 
         print("\nAnswer:", answer)
 
         print("\nRetrieved Sources:")
-        for chunk, score in retrieve(question):
-            print(f"- [{score:.3f}] {chunk}")
+        for i, (chunk, score,meta) in enumerate(sources, start = 1):
+             print(
+                f"[Source {i}] "
+                f"- {meta['source']} | "
+                f"Chunk {meta['chunk_id']} | "
+                f"Similarity: {score:.3f}"
+            )
